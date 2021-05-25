@@ -26,8 +26,8 @@ locals {
 }
 
 resource "vault_jwt_auth_backend_role" "default" {
-  backend   = local.backend_path
-  role_name = local.role_id
+  backend               = local.backend_path
+  role_name             = local.role_id
   role_type             = local.backend_path
   user_claim            = "email"
   groups_claim          = "groups"
@@ -46,7 +46,7 @@ resource "vault_identity_group" "default" {
 }
 
 resource "vault_identity_group_alias" "default" {
-  name = "OIDC_AD_Group_Slug"
+  name           = "OIDC_AD_Group_Slug"
   mount_accessor = local.mount_accessor
   canonical_id   = vault_identity_group.default.id
 }
