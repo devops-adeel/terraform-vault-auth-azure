@@ -3,6 +3,10 @@ terraform {
     vault = {
       source = "hashicorp/vault"
     }
+    azuread = {
+      source = "hashicorp/azuread"
+      version = "~> 1.5.0"
+    }
   }
   backend "remote" {
     organization = "hc-implementation-services"
