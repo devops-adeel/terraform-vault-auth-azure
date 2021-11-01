@@ -1,76 +1,50 @@
-/**
- * Usage:
- *
- * ```hcl
- *
- * module "vault_oidc_azure" {
- *   source            = "git::https://github.com/devops-adeel/terraform-vault-auth-azure.git?ref=v0.1.0"
- *   application_name  = "tdp"
- *   env               = "dev"
- *   service           = "web"
- *   identity_group_id = module.static_secrets.identity_group_id
- *   mount_accessor    = vault_auth_backend.default.accessor
- * }
- * ```
- */
+data "azuread_client_config" "default" {}
 
+data "azuread_application" "default" {
+  display_name = var.application_name
+}
 
-locals {
-  ad_group       = var.ad_group
-  env            = var.env
-  service        = var.service
-  application    = var.application_name
-  mount_accessor = var.mount_accessor
-  backend_path   = "oidc"
+resource "time_rotating" "default" {
+  rotation_days = 7
+}
+
+resource "azuread_application_password" "default" {
+  display_name          = var.application_name
+  application_object_id = data.azuread_application.default.object_id
+  end_date_relative     = "17250h"
+  keepers = {
+    rotation = time_rotating.default.id
+  }
+}
+
+resource "time_static" "default" {
+  triggers = {
+    client_secret = azuread_application_password.default.value
+  }
+}
+
+resource "vault_jwt_auth_backend" "default" {
+  description        = "Vault OIDC Auth Method"
+  path               = "oidc"
+  type               = "oidc"
+  default_role       = var.application_name
+  provider_config    = { provider = "azure" }
+  oidc_discovery_url = local.oidc_url
+  oidc_client_id     = data.azuread_application.default.application_id
+  oidc_client_secret = time_static.default.triggers.client_secret
+  tune {
+    default_lease_ttl = "768h"
+    max_lease_ttl     = "768h"
+    token_type        = "default-service"
+  }
 }
 
 resource "vault_jwt_auth_backend_role" "default" {
-  backend               = local.backend_path
-  role_name             = local.ad_group
-  role_type             = local.backend_path
+  backend               = vault_jwt_auth_backend.default.path
+  role_type             = vault_jwt_auth_backend.default.path
+  role_name             = var.application_name
+  oidc_scopes           = ["profile", "https://graph.microsoft.com/.default"]
+  allowed_redirect_uris = element(data.azuread_application.default.web[*].redirect_uris, 0)
   user_claim            = "email"
   groups_claim          = "groups"
-  allowed_redirect_uris = ["http://localhost:8200/ui/vault/auth/oidc/oidc/callback"]
-  oidc_scopes           = ["https://graph.microsoft.com/.default"]
-}
-
-resource "vault_identity_group" "default" {
-  name = local.ad_group
-  type = "external"
-  metadata = {
-    env         = local.env
-    service     = local.service
-    application = local.application
-  }
-}
-
-resource "vault_identity_group_alias" "default" {
-  name           = local.ad_group
-  mount_accessor = local.mount_accessor
-  canonical_id   = vault_identity_group.default.id
-}
-
-data "vault_policy_document" "default" {
-  rule {
-    path         = "secret/+/{{identity.groups.ids.${vault_identity_group.default.id}.metadata.env}}-{{identity.groups.ids.${vault_identity_group.default.id}.metadata.service}}/*"
-    capabilities = ["create", "read", "update", "delete", "list"]
-    description  = "allow read of static secret object named after metadata keys"
-  }
-  rule {
-    path         = "auth/token/*"
-    capabilities = ["create", "read", "update", "delete", "list"]
-    description  = "create child tokens"
-  }
-}
-
-resource "vault_policy" "default" {
-  name   = "${local.ad_group}-default-kv-store"
-  policy = data.vault_policy_document.default.hcl
-}
-
-
-resource "vault_identity_group_policies" "default" {
-  group_id  = vault_identity_group.default.id
-  exclusive = false
-  policies  = [vault_policy.default.name]
 }
